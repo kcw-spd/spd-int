@@ -1,0 +1,115 @@
+
+
+
+
+
+
+
+
+
+def assign_top_vehicles(vehicle_list_df, owner_vehicle_info, presence_of_children, income_key):
+    # Extract current vehicle make and types
+    owner_make = owner_vehicle_info['MAKE'].upper()
+    current_vehicle_types = owner_vehicle_info['VEHICLE_TYPES']  # Assuming this is a list of types
+
+    # Check if the owner's current make is a luxury brand
+    is_luxury_owner = owner_make in luxury_brands
+
+    # Calculate loyalty and luxury multipliers
+    loyalty_score = loyalty_scores.get(owner_make, 0)
+    loyalty_factor = 2 * loyalty_score + 1  # More significant loyalty factor
+    print("Loyalty factor:", loyalty_factor)
+
+    income_scale = {"A": 1, "B": 2, "C": 3, "D": 4, "E": 5, "F": 6, "G": 7, "H": 8, "I": 9, "J": 10, "K": 11, "L": 12, "M": 13, "N": 14, "O": 15, "P": 16, "Q": 17, "R": 18, "U": 19}
+    income_value = income_scale.get(income_key, 1) # Default to 1 if key not found
+
+    # Incrementally increase weight for luxury vehicles based on income
+    luxury_multiplier = 1 + (income_value / len(income_scale))
+    print("Luxury multiplier:", luxury_multiplier)
+
+    # Adjust weights based on preferences
+    weights = adjust_weights_for_preferences(vehicle_list_df, current_vehicle_types, presence_of_children, luxury_multiplier, loyalty_factor, owner_make)
+
+    # Normalize the weights
+    weights /= weights.sum()
+    print("Normalized weights:", weights[:10])
+
+    # Ensure one vehicle of the same make is selected
+    same_make_indices = vehicle_list_df[vehicle_list_df['MAKE'] == owner_make].index
+    if len(same_make_indices) > 0:
+        chosen_index_same_make = np.random.choice(same_make_indices, size=1)
+    else:
+        # Fallback if no vehicle of the same make is found
+        chosen_index_same_make = np.random.choice(vehicle_list_df.index, size=1, p=weights)
+
+    # Select two more vehicles based on weights
+    chosen_indices_additional = np.random.choice(vehicle_list_df.index, size=2, replace=False, p=weights)
+
+    # Combine indices and fetch vehicles
+    chosen_indices = np.concatenate((chosen_index_same_make, chosen_indices_additional))
+    recommended_vehicles = vehicle_list_df.loc[chosen_indices]
+
+    return recommended_vehicles[['MAKE', 'MODEL', 'VEHICLE_TYPES']].to_dict('records')
+
+
+def fetch_data_and_recommend(conn):
+    # Execute a database query to fetch required records
+    cursor = conn.cursor(dictionary=True)
+    query = "SELECT id, PresenceOfChildren, AutoOwnerMake, IncomeKey FROM dis.inventory where AutoOwnerMake = 'NISSAN' limit 5"
+    cursor.execute(query)
+    
+    # Fetch all the records from the executed query
+    records = cursor.fetchall()
+
+    # Process each record to generate vehicle recommendations
+    for record in records:
+        # Convert the make to uppercase for consistency
+        owner_make = record['AutoOwnerMake'].upper()
+
+        # Fetch the loyalty score for the owner's make, defaulting to 0 if not found
+        loyalty_score = loyalty_scores.get(owner_make, 0)
+        
+        # Determine if the owner's current make is a luxury brand
+        is_luxury_owner = owner_make in luxury_brands
+
+        # Check if the owner has children
+        presence_of_children = record['PresenceOfChildren'] == 'Yes'
+
+        # Map the income key to a numerical value
+        income_key = income_key_mapping.get(record['IncomeKey'].upper(), 0)
+
+        # Get the top 3 vehicle recommendations based on the owner's profile
+        top_vehicles = assign_top_vehicles(vehicle_list_df, owner_make, loyalty_score, is_luxury_owner, presence_of_children, income_key)
+
+        # Print the recommendations for the current profile
+        pprint(f"Recommendations for profile {record['id']}:")
+        
+        # Print the owner's current make
+        pprint(f"Current vehicle: {owner_make}")
+        
+        # Print the owner's loyalty score for the current make
+        pprint(f"Loyalty score: {loyalty_score}")
+        
+        # Print whether the owner is a luxury owner
+        pprint(f"Luxury owner: {is_luxury_owner}")
+        
+        # Print whether the owner has children
+        pprint(f"Presence of children: {presence_of_children}")
+        
+        # Print the owner's income key
+        pprint(f"Income key: {income_key}")
+        
+        
+        # Print each recommended vehicle's make, model, and types
+        for vehicle in top_vehicles:
+            pprint(f"{vehicle['MAKE']} {vehicle['MODEL']} ({vehicle['VEHICLE_TYPES']})")
+
+if __name__ == '__main__':
+
+    conn = mysql.connector.connect(**work_db_config)
+    if conn:
+        fetch_data_and_recommend(conn)
+       
+    conn.close()
+else:
+    print("Failed to establish database connection.")
